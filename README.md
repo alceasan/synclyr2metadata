@@ -1,115 +1,116 @@
 # synclyr2metadata
 
-Un pequeño programa de consola que descarga automáticamente las letras sincronizadas (formato LRC) desde [LRCLIB](https://lrclib.net) y las **incrusta directamente dentro de tus archivos de música**.
+A lightweight command-line tool that automatically downloads synchronized lyrics (LRC format) from [LRCLIB](https://lrclib.net) and **embeds them directly into your audio files' metadata**.
 
-Perfecto para usar con **Lidarr**, **Navidrome**, **Jellyfin**, **Plex**, o cualquier reproductor que lea letras desde los metadatos de las canciones.
+Perfect for use with **Lidarr**, **Navidrome**, **Jellyfin**, **Plex**, or any modern music player that reads embedded lyrics.
 
-## ¿Qué hace exactamente?
+## What does it do?
 
-1. Escanea tu música (lee los metadatos como Artista, Título, Álbum y Duración).
-2. Busca la letra sincronizada en LRCLIB usando un sistema de doble pasada (Artista+Título primero, y si falla, incluye Álbum+Duración).
-3. Si la encuentra, la guarda permanentemente dentro del propio archivo de música en el tag `LYRICS`. No crea archivos `.lrc` separados.
+1. Scans your audio files (reading `Artist`, `Title`, `Album`, and `Duration` metadata).
+2. Searches for synchronized lyrics on LRCLIB using a smart two-pass strategy (`Artist` + `Title` first, then falls back to adding `Album` + `Duration` if parsing fails).
+3. If lyrics are found, it embeds them permanently into the audio file under the `LYRICS` tag. No separate `.lrc` sidecar files are created.
 
-Soporta casi cualquier formato: **FLAC**, **MP3**, **OGG**, **M4A/AAC**, **OPUS**, etc. (Gracias a [TagLib](https://taglib.org/)).
+Supports almost any audio format: **FLAC**, **MP3**, **OGG**, **M4A/AAC**, **OPUS**, etc. (Powered by [TagLib](https://taglib.org/)).
 
 ---
 
-## 🚀 Integración con Lidarr en Docker (Recomendado)
+## 🚀 Lidarr Docker Integration (Recommended)
 
-La inmensa mayoría de usuarios tenemos Lidarr dentro de un contenedor Docker. Para que Lidarr descargue y meta las letras automáticamente cada vez que importa un álbum nuevo, sigue estos pasos:
+Most of us run Lidarr in a Docker container. To make Lidarr automatically download and embed lyrics every time a new album is imported, follow these steps:
 
-### 1. Compilar el programa
-Primero necesitas compilar el programa en tu máquina host (fuera de Docker):
+### 1. Build the program
+First, compile the program on your host machine (outside of Docker):
 
 ```bash
-# Instala las dependencias en tu Linux (Debian/Ubuntu)
+# Install dependencies (Debian/Ubuntu)
 sudo apt install build-essential libcurl4-openssl-dev libtag1-dev
 
-# Clona y compila
+# Clone and build
 git clone https://github.com/newtonsart/synclyr2metadata.git
 cd synclyr2metadata
 make
 ```
 
-### 2. Copiar los archivos a Lidarr
-Ahora tienes un archivo binario llamado `synclyr2metadata` y un script llamado `lidarr-lyrics.sh`. Tienes que moverlos a la carpeta de configuración de tu Lidarr (para que el contenedor pueda "verlos"):
+### 2. Copy the files to Lidarr
+You now have a binary named `synclyr2metadata` and a shell script `lidarr-lyrics.sh`. Move them to your Lidarr configuration volume (so the container can "see" them):
 
 ```bash
-# Asumiendo que tu config de Lidarr está en /opt/media-stack/config/lidarr
+# Assuming your Lidarr config volume is mounted at /opt/media-stack/config/lidarr
 mkdir -p /opt/media-stack/config/lidarr/scripts
 cp synclyr2metadata /opt/media-stack/config/lidarr/scripts/
 cp lidarr-lyrics.sh /opt/media-stack/config/lidarr/scripts/
 ```
 
-### 3. Ajustar tu docker-compose.yml
-El contenedor de Lidarr no viene con las librerías necesarias de serie. Si usas las imágenes de **LinuxServer** o **Hotio**, puedes hacer que las instale automáticamente al arrancar.
+### 3. Adjust your docker-compose.yml
+The Lidarr container doesn't come with the required libraries pre-installed (`libcurl` and `taglib`). If you use **LinuxServer** or **Hotio** images, you can configure them to install these automatically on boot.
 
-Añade esto a los `environment` de tu Lidarr en tu `docker-compose.yml`:
+Add the following to the `environment` section of your Lidarr service in your `docker-compose.yml`:
 
-**Si usas Hotio (`ghcr.io/hotio/lidarr`):**
+**If you use Hotio (`ghcr.io/hotio/lidarr`):**
 ```yaml
     environment:
-      # Dependiendo de si es la versión Alpine o Debian/Ubuntu:
-      - APTPKGS=libcurl4 taglib-c1v5    # (Para versiones Debian/Ubuntu basadas)
-      # - APKPKGS=curl taglib-c         # (Descomenta y usa esta si la imagen usa Alpine)
+      # Use this for Debian/Ubuntu-based images (like pr-plugins):
+      - APTPKGS=libcurl4 taglib-c1v5
+      # Use this if your hotio image is Alpine-based:
+      # - APKPKGS=curl taglib-c
 ```
 
-**Si usas LinuxServer (`lscr.io/linuxserver/lidarr`):**
+**If you use LinuxServer (`lscr.io/linuxserver/lidarr`):**
 ```yaml
     environment:
-      # LinuxServer siempre es Alpine Linux
+      # LinuxServer images are always Alpine-based
       - DOCKER_MODS=linuxserver/mods:universal-package-install
       - INSTALL_PACKAGES=curl taglib-c
 ```
 
-Una vez añadido, haz un `docker-compose up -d` para reiniciar Lidarr y que se instalen.
+Once added, run `docker-compose up -d` to restart Lidarr and install the requirements.
 
-### 4. Activar el Custom Script en Lidarr
+### 4. Enable the Custom Script in Lidarr
 
-1. Entra a la interfaz web de Lidarr.
-2. Ve a **Settings → Connect → + → Custom Script**.
-3. Rellena los datos:
+1. Open the Lidarr Web UI.
+2. Navigate to **Settings → Connect → + → Custom Script**.
+3. Fill in the details:
    - **Name**: `Sync Lyrics`
-   - **On Release Import**: Actívalo (✓)
-   - **On Upgrade**: Actívalo (✓)
-   - **Path**: `/config/scripts/lidarr-lyrics.sh` *(Ojo: esta es la ruta DENTRO del contenedor)*
-4. Guarda y dale al botón **Test** para comprobar que funciona.
+   - **On Release Import**: Enable (✓)
+   - **On Upgrade**: Enable (✓)
+   - **Path**: `/config/scripts/lidarr-lyrics.sh` *(Note: This is the path INSIDE the container)*
+4. Save and click the **Test** button to verify it works.
 
-Opcional: Revisa el archivo de texto `/config/scripts/synclyr2metadata.log` dentro de tu carpeta de configuración para ver el reporte de todo lo que se descarga.
+Optional: You can check the log file located at `/config/scripts/synclyr2metadata.log` inside your config directory to monitor what is being downloaded.
 
 ---
 
-## 💻 Uso Manual por Terminal
+## 💻 Manual CLI Usage
 
-Si quieres usarlo a mano en tu ordenador o servidor para escanear música que ya tienes, los comandos son muy sencillos.
+If you want to use the tool manually on your computer or server to scan your existing music library, the commands are straightforward.
 
-Ejecútalo pasándole una de estas tres opciones:
+Run the binary passing one of these three primary options:
 
-### 1. Sincronizar un solo álbum
+### 1. Sync a single album
 ```bash
-./synclyr2metadata --sync "/ruta/a/musica/Artista/Album (2024)"
+./synclyr2metadata --sync "/path/to/music/Artist/Album (2024)"
 ```
 
-### 2. Sincronizar todos los álbumes de un artista
+### 2. Sync all albums for an artist
 ```bash
-./synclyr2metadata --artist "/ruta/a/musica/Lil Wayne" --threads 8
+./synclyr2metadata --artist "/path/to/music/Lil Wayne" --threads 8
 ```
 
-### 3. Escanear toda tu biblioteca de golpe
-Aviso: asumimos que tu música está organizada en carpetas de `Artistas / Álbumes`.
+### 3. Scan your entire library at once
+*Note: This assumes your music is organized in simple `Artist / Album` folders.*
 ```bash
-./synclyr2metadata --library "/ruta/a/musica" --threads 10
+./synclyr2metadata --library "/path/to/music" --threads 10
 ```
 
-### Opciones Extra
+### Extra Options
 
-| Opción | ¿Para qué sirve? |
+| Option | Purpose |
 |---|---|
-| `--force` | Fuerza la descarga sobreescribiendo las letras que ya tuvieras guardadas de antes. |
-| `--threads N` | El programa usa descarga en paralelo (multihilo) para ir rapidísimo. Por defecto usa 4 hilos, pero puedes subirlo hasta 16 con `--threads 16`. |
-| `--help` | Muestra la ayuda rápida en pantalla. |
+| `--force` | Force download and overwrite any existing lyrics you might already have embedded. |
+| `--threads N` | The program downloads heavily in parallel using multiple threads. It defaults to 4 threads, but you can crank this up to `16` for huge libraries. |
+| `--help` | Shows the quick help manual. |
 
-### Ejemplo del resultado en pantalla:
+### Example Output:
 ```text
 ═══ MF DOOM
 
@@ -126,8 +127,8 @@ Aviso: asumimos que tu música está organizada en carpetas de `Artistas / Álbu
 ──────────────────────────────────────────────
 ```
 
-## Créditos y Licencia
+## Credits & License
 
-- Letras proveídas por la fantástica base de datos gratuita y abierta [LRCLIB](https://lrclib.net).
-- Basado en las librerías open source [libcurl](https://curl.se/), [TagLib](https://taglib.org/) y [cJSON](https://github.com/DaveGamble/cJSON).
-- Licencia de código abierto: [GPLv3](LICENSE).
+- Lyrics provided by the fantastic, free, and open-source database [LRCLIB](https://lrclib.net).
+- Built heavily relying on the open-source libraries [libcurl](https://curl.se/), [TagLib](https://taglib.org/), and [cJSON](https://github.com/DaveGamble/cJSON).
+- Open-source software licensed under [GPLv3](LICENSE).
