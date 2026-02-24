@@ -15,10 +15,10 @@
 #   lidarr_album_title     = Album Name
 #
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BIN="$SCRIPT_DIR/synclyr2metadata"
+# Default docker container paths for Lidarr
+BIN="/config/scripts/synclyr2metadata"
+LOG="/config/scripts/synclyr2metadata.log"
 THREADS=8
-LOG="/var/log/synclyr2metadata.log"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
