@@ -1,0 +1,7 @@
+.git/
+.gitignore
+build/
+synclyr2metadata
+lidarr-lyrics.sh
+README.md
+LICENSE
