@@ -7,33 +7,37 @@ Perfect for use with **Lidarr**, **Navidrome**, **Jellyfin**, **Plex**, or any m
 ## What does it do?
 
 1. Scans your audio files and reads their metadata (Artist, Title, Album, Duration).
-2. Searches for synchronized lyrics on LRCLIB using a two-pass strategy (Artist + Title first, then falls back to Album + Duration).
-3. Embeds the lyrics permanently into the file's `LYRICS` tag. No separate `.lrc` files.
+2. Searches for synchronized lyrics on LRCLIB. Falls back to plain lyrics when synced aren't available.
+3. Embeds the lyrics permanently into the file's `LYRICS` tag — no separate `.lrc` files needed.
 
 Supports **FLAC**, **MP3**, **OGG**, **M4A/AAC**, **OPUS**, and more (powered by [TagLib](https://taglib.org/)).
 
 ---
 
-## 🚀 Lidarr Docker Integration
+## 🎵 Lidarr Integration
 
-Auto-sync lyrics every time Lidarr imports a new album.
+Auto-sync lyrics every time Lidarr imports a new album. Choose the section that matches your setup:
 
-### 1. Clone and build
+---
 
-The default `make` compiles inside an Alpine Docker container, producing a binary compatible with Lidarr Docker images (Hotio / LinuxServer):
+### 🐳 Option A: Lidarr running in Docker
+
+> This is the most common setup (Hotio or LinuxServer images on Alpine Linux).
+
+#### 1. Build
+
+The default `make` cross-compiles inside an Alpine Docker container, producing a binary compatible with Docker-based Lidarr images:
 
 ```bash
-sudo apt install build-essential   # only needed for make itself
+sudo apt install build-essential docker.io   # host prerequisites
 git clone https://github.com/newtonsart/synclyr2metadata.git
 cd synclyr2metadata
 make
 ```
 
-> If you prefer to build natively on your host (requires `libcurl-dev` and `libtag1-dev`), use `make native` instead.
+#### 2. Deploy
 
-### 2. Deploy to Lidarr
-
-Copy the binary and script into your Lidarr config volume:
+Copy the binary and script into your Lidarr container's config volume:
 
 ```bash
 mkdir -p /path/to/lidarr/config/scripts
@@ -41,9 +45,33 @@ cp synclyr2metadata /path/to/lidarr/config/scripts/
 cp lidarr-lyrics.sh /path/to/lidarr/config/scripts/
 ```
 
-### 3. Enable the Custom Script
+> Replace `/path/to/lidarr/config` with your actual Lidarr config mount (e.g. `./config` or `/opt/media-stack/config/lidarr`).
 
-1. Open the Lidarr Web UI → **Settings → Connect → + → Custom Script**.
+#### 3. Install runtime dependencies
+
+The binary needs `libcurl` and `libtag_c` inside the container. Add these to your `docker-compose.yml`:
+
+**Hotio images:**
+```yaml
+environment:
+  - APKPKGS=curl taglib
+```
+
+**LinuxServer images:**
+```yaml
+environment:
+  - INSTALL_PACKAGES=curl taglib
+```
+
+Then recreate the container:
+
+```bash
+docker compose down && docker compose up -d
+```
+
+#### 4. Enable the Custom Script
+
+1. Open Lidarr UI → **Settings → Connect → + → Custom Script**.
 2. Configure:
    - **Name**: `Sync Lyrics`
    - **On Release Import**: ✓
@@ -51,11 +79,59 @@ cp lidarr-lyrics.sh /path/to/lidarr/config/scripts/
    - **Path**: `/config/scripts/lidarr-lyrics.sh`
 3. Click **Test**, then **Save**.
 
-Logs are written to `/config/scripts/synclyr2metadata.log`.
+Logs: `/config/scripts/synclyr2metadata.log` (auto-rotated at 100KB).
 
 ---
 
-## 💻 Manual CLI Usage
+### 💻 Option B: Lidarr installed natively
+
+> For bare-metal or systemd-based Lidarr installations.
+
+#### 1. Install dependencies and build
+
+```bash
+# Debian / Ubuntu
+sudo apt install build-essential libcurl4-openssl-dev libtag1-dev
+
+# Arch
+sudo pacman -S base-devel curl taglib
+
+# Then build
+git clone https://github.com/newtonsart/synclyr2metadata.git
+cd synclyr2metadata
+make native
+```
+
+#### 2. Install system-wide
+
+```bash
+sudo make install      # installs to /usr/local/bin
+```
+
+#### 3. Deploy the custom script
+
+```bash
+mkdir -p /path/to/lidarr/scripts
+cp lidarr-lyrics.sh /path/to/lidarr/scripts/
+```
+
+> Make sure the script path and the binary are both accessible by the user running Lidarr.
+
+#### 4. Enable the Custom Script
+
+1. Open Lidarr UI → **Settings → Connect → + → Custom Script**.
+2. Configure:
+   - **Name**: `Sync Lyrics`
+   - **On Release Import**: ✓
+   - **On Upgrade**: ✓
+   - **Path**: `/path/to/lidarr/scripts/lidarr-lyrics.sh`
+3. Click **Test**, then **Save**.
+
+---
+
+## 🛠 Manual CLI Usage
+
+You can also use `synclyr2metadata` directly from the command line:
 
 ```bash
 # Sync a single album
@@ -65,13 +141,16 @@ Logs are written to `/config/scripts/synclyr2metadata.log`.
 ./synclyr2metadata --artist "/path/to/Artist" --threads 8
 
 # Sync your entire library (Artist/Album structure)
-./synclyr2metadata --library "/path/to/music" --threads 10
+./synclyr2metadata --library "/path/to/music" --threads 4
 ```
 
 ### Options
 
 | Option | Description |
 |---|---|
+| `--sync PATH` | Sync lyrics for a single album directory |
+| `--artist PATH` | Sync all albums under an artist directory |
+| `--library PATH` | Sync entire library (artist/album structure) |
 | `--force` | Overwrite existing embedded lyrics |
 | `--threads N` | Parallel download threads (default: 4, max: 16) |
 | `--help` | Show help |
@@ -83,15 +162,19 @@ Logs are written to `/config/scripts/synclyr2metadata.log`.
 
 ▶ MM.FOOD (2004) (26 tracks)
   [ 1/26] Beef Rapp                                ✓ synced
-  [ 2/26] Hoe Cakes                                ⊘ already has lyrics
-  [ 3/26] Unreleased Track                         ✗ not found
+  [ 2/26] Hoe Cakes                                ✓ plain
+  [ 3/26] Potholderz                               ⊘ already has lyrics
+  [ 4/26] Unreleased Track                         ✗ not found
 
 ──────────────────────────────────────────────
-  ✓ Synced:     23
+  ✓ Synced:     22
+  ✓ Plain:      1
   ⊘ Skipped:    1
   ✗ Not found:  2
 ──────────────────────────────────────────────
 ```
+
+---
 
 ## License
 

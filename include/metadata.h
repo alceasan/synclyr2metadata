@@ -47,6 +47,16 @@ TrackMetaList *metadata_scan_dir(const char *dirpath);
 int metadata_write_lyrics(const char *filepath, const char *lyrics);
 
 /*
+ * Check and write lyrics in a single TagLib file open.
+ * If force=0 and lyrics already exist, skips writing.
+ *
+ * Returns:  1 = lyrics written
+ *           0 = skipped (already has lyrics, force=0)
+ *          -1 = error (could not open/save file)
+ */
+int metadata_sync_lyrics(const char *filepath, const char *lyrics, int force);
+
+/*
  * Check if an audio file already has embedded lyrics.
  * Returns 1 if lyrics exist, 0 if not, -1 on error.
  */

@@ -10,7 +10,7 @@
 #
 
 CC       = gcc
-CFLAGS   = -O2 -Wall -Wextra -pedantic -std=c11
+CFLAGS   = -O2 -Wall -Wextra -pedantic -std=c11 -D_POSIX_C_SOURCE=200809L
 TARGET   = synclyr2metadata
 
 SRC_DIR   = src

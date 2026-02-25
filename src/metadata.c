@@ -5,8 +5,6 @@
  * and provides directory scanning for batch processing.
  */
 
-#define _POSIX_C_SOURCE 200809L
-
 #include "metadata.h"
 
 #include <taglib/tag_c.h>
@@ -244,6 +242,42 @@ int metadata_has_lyrics(const char *filepath)
     taglib_file_free(file);
 
     return has;
+}
+
+int metadata_sync_lyrics(const char *filepath, const char *lyrics, int force)
+{
+    if (!filepath || !lyrics) {
+        return -1;
+    }
+
+    TagLib_File *file = taglib_file_new(filepath);
+    if (!file || !taglib_file_is_valid(file)) {
+        if (file) taglib_file_free(file);
+        return -1;
+    }
+
+    /* Check existing lyrics if not forcing */
+    if (!force) {
+        char **values = taglib_property_get(file, "LYRICS");
+        int has = (values && values[0] && values[0][0] != '\0');
+        taglib_property_free(values);
+        if (has) {
+            taglib_file_free(file);
+            return 0;  /* already has lyrics */
+        }
+    }
+
+    /* Write lyrics */
+    taglib_property_set(file, "LYRICS", lyrics);
+
+    int result = 1;
+    if (!taglib_file_save(file)) {
+        fprintf(stderr, "error: failed to save '%s'\n", filepath);
+        result = -1;
+    }
+
+    taglib_file_free(file);
+    return result;
 }
 
 /* ── Memory management ─────────────────────────────────────────────────── */

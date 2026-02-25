@@ -5,7 +5,6 @@
  *   synclyr2metadata --sync    "/path/to/album"
  *   synclyr2metadata --artist  "/path/to/artist"
  *   synclyr2metadata --library "/path/to/music"
- *   synclyr2metadata --scan    "/path/to/album"
  */
 
 #include "http_client.h"
@@ -18,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 /* ── Usage ─────────────────────────────────────────────────────────────── */
 
@@ -49,6 +49,7 @@ typedef struct {
     int                  force;
     int                  next_index;
     int                  synced;
+    int                  plain;
     int                  skipped;
     int                  not_found;
     int                  errors;
@@ -56,11 +57,12 @@ typedef struct {
 } SyncContext;
 
 static void process_track(const TrackMeta *t, int force,
-                          int *out_synced, int *out_skipped,
-                          int *out_not_found, int *out_error,
-                          const char **out_status)
+                          int *out_synced, int *out_plain,
+                          int *out_skipped, int *out_not_found,
+                          int *out_error, const char **out_status)
 {
     *out_synced = 0;
+    *out_plain = 0;
     *out_skipped = 0;
     *out_not_found = 0;
     *out_error = 0;
@@ -71,12 +73,7 @@ static void process_track(const TrackMeta *t, int force,
         return;
     }
 
-    if (!force && metadata_has_lyrics(t->filepath) == 1) {
-        *out_skipped = 1;
-        *out_status = "\xe2\x8a\x98 already has lyrics";
-        return;
-    }
-
+    /* Exact match: artist+title first, then with album+duration */
     LrclibTrack *lrc = lrclib_get(t->artist, t->title, NULL, 0);
 
     if ((!lrc || !lrc->synced_lyrics || lrc->synced_lyrics[0] == '\0')
@@ -85,22 +82,51 @@ static void process_track(const TrackMeta *t, int force,
         lrc = lrclib_get(t->artist, t->title, t->album, (double)t->duration);
     }
 
-    if (!lrc || !lrc->synced_lyrics || lrc->synced_lyrics[0] == '\0') {
+    if (!lrc) {
+        *out_not_found = 1;
+        *out_status = "\xe2\x9c\x97 not found";
+        return;
+    }
+
+    /* Pick best available lyrics: synced first, then plain */
+    const char *lyrics = NULL;
+    const char *sync_status = NULL;
+    int is_synced = 0;
+
+    if (lrc->synced_lyrics && lrc->synced_lyrics[0] != '\0') {
+        lyrics = lrc->synced_lyrics;
+        sync_status = "\xe2\x9c\x93 synced";
+        is_synced = 1;
+    } else if (lrc->plain_lyrics && lrc->plain_lyrics[0] != '\0') {
+        lyrics = lrc->plain_lyrics;
+        sync_status = "\xe2\x9c\x93 plain";
+    }
+
+    if (!lyrics) {
         *out_not_found = 1;
         *out_status = "\xe2\x9c\x97 not found";
         lrclib_track_free(lrc);
         return;
     }
 
-    if (metadata_write_lyrics(t->filepath, lrc->synced_lyrics) == 0) {
-        *out_synced = 1;
-        *out_status = "\xe2\x9c\x93 synced";
+    /* Single TagLib open: check existing + write if needed */
+    int rc = metadata_sync_lyrics(t->filepath, lyrics, force);
+    lrclib_track_free(lrc);
+
+    if (rc == 1) {
+        if (is_synced) {
+            *out_synced = 1;
+        } else {
+            *out_plain = 1;
+        }
+        *out_status = sync_status;
+    } else if (rc == 0) {
+        *out_skipped = 1;
+        *out_status = "\xe2\x8a\x98 already has lyrics";
     } else {
         *out_error = 1;
         *out_status = "\xe2\x9c\x97 write error";
     }
-
-    lrclib_track_free(lrc);
 }
 
 static void *sync_worker(void *arg)
@@ -118,39 +144,38 @@ static void *sync_worker(void *arg)
 
         const TrackMeta *t = ctx->list->items[idx];
 
-        int s = 0, sk = 0, nf = 0, e = 0;
+        int s = 0, p = 0, sk = 0, nf = 0, e = 0;
         const char *status = "";
-        process_track(t, ctx->force, &s, &sk, &nf, &e, &status);
+        process_track(t, ctx->force, &s, &p, &sk, &nf, &e, &status);
 
         pthread_mutex_lock(&ctx->mutex);
         printf("  [%2d/%d] %-40.40s %s\n",
                idx + 1, ctx->list->count,
                t->title ? t->title : "(unknown)", status);
         ctx->synced    += s;
+        ctx->plain     += p;
         ctx->skipped   += sk;
         ctx->not_found += nf;
         ctx->errors    += e;
         pthread_mutex_unlock(&ctx->mutex);
+
+        /* Rate limit: 50ms between requests to be polite to LRCLIB */
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 50000000 };
+        nanosleep(&ts, NULL);
     }
 
+    http_thread_cleanup();
     return NULL;
 }
 
 /*
- * Sync a single album directory. Returns counts via out params.
+ * Run the sync workers on a pre-scanned list. The caller owns `list`.
  */
-static int sync_directory(const char *dirpath, int force, int num_threads,
-                          int *total_s, int *total_sk, int *total_nf, int *total_e)
+static void sync_tracks(const TrackMetaList *list, int force, int num_threads,
+                        int *total_s, int *total_p, int *total_sk,
+                        int *total_nf, int *total_e)
 {
-    TrackMetaList *list = metadata_scan_dir(dirpath);
-    if (!list) {
-        return 1;
-    }
-
-    if (list->count == 0) {
-        metadata_list_free(list);
-        return 0;
-    }
+    if (!list || list->count == 0) return;
 
     int t = num_threads > list->count ? list->count : num_threads;
 
@@ -159,6 +184,7 @@ static int sync_directory(const char *dirpath, int force, int num_threads,
         .force      = force,
         .next_index = 0,
         .synced     = 0,
+        .plain      = 0,
         .skipped    = 0,
         .not_found  = 0,
         .errors     = 0,
@@ -177,12 +203,10 @@ static int sync_directory(const char *dirpath, int force, int num_threads,
     pthread_mutex_destroy(&ctx.mutex);
 
     *total_s  += ctx.synced;
+    *total_p  += ctx.plain;
     *total_sk += ctx.skipped;
     *total_nf += ctx.not_found;
     *total_e  += ctx.errors;
-
-    metadata_list_free(list);
-    return 0;
 }
 
 /*
@@ -197,10 +221,13 @@ static int is_directory(const char *path)
 /*
  * Print the totals summary.
  */
-static void print_summary(int synced, int skipped, int not_found, int errors)
+static void print_summary(int synced, int plain, int skipped, int not_found, int errors)
 {
     printf("\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
     printf("  \xe2\x9c\x93 Synced:     %d\n", synced);
+    if (plain > 0) {
+        printf("  \xe2\x9c\x93 Plain:      %d\n", plain);
+    }
     printf("  \xe2\x8a\x98 Skipped:    %d\n", skipped);
     printf("  \xe2\x9c\x97 Not found:  %d\n", not_found);
     if (errors > 0) {
@@ -222,15 +249,14 @@ static int cmd_sync(const char *dirpath, int force, int num_threads)
         printf("No audio files found in '%s'.\n", dirpath);
         return 0;
     }
-    int count = list->count;
-    metadata_list_free(list);
 
     printf("Syncing lyrics for %d track(s) in '%s' [%d threads]...\n\n",
-           count, dirpath, num_threads);
+           list->count, dirpath, num_threads);
 
-    int s = 0, sk = 0, nf = 0, e = 0;
-    sync_directory(dirpath, force, num_threads, &s, &sk, &nf, &e);
-    print_summary(s, sk, nf, e);
+    int s = 0, p = 0, sk = 0, nf = 0, e = 0;
+    sync_tracks(list, force, num_threads, &s, &p, &sk, &nf, &e);
+    metadata_list_free(list);
+    print_summary(s, p, sk, nf, e);
 
     return (e > 0) ? 1 : 0;
 }
@@ -251,7 +277,7 @@ static int cmd_artist(const char *artist_path, int force, int num_threads)
 
     printf("\u2550\u2550\u2550 %s \u2550\u2550\u2550\n\n", artist_name);
 
-    int s = 0, sk = 0, nf = 0, e = 0;
+    int s = 0, p = 0, sk = 0, nf = 0, e = 0;
     int album_count = 0;
 
     struct dirent *entry;
@@ -278,9 +304,9 @@ static int cmd_artist(const char *artist_path, int force, int num_threads)
 
         album_count++;
         printf("\u25b6 %s (%d tracks)\n", entry->d_name, list->count);
-        metadata_list_free(list);
 
-        sync_directory(sub, force, num_threads, &s, &sk, &nf, &e);
+        sync_tracks(list, force, num_threads, &s, &p, &sk, &nf, &e);
+        metadata_list_free(list);
         printf("\n");
         free(sub);
     }
@@ -293,7 +319,7 @@ static int cmd_artist(const char *artist_path, int force, int num_threads)
     }
 
     printf("%d album(s) processed", album_count);
-    print_summary(s, sk, nf, e);
+    print_summary(s, p, sk, nf, e);
 
     return (e > 0) ? 1 : 0;
 }
@@ -315,7 +341,7 @@ static int cmd_library(const char *library_path, int force, int num_threads)
     printf("  Threads:  %d\n", num_threads);
     printf("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n");
 
-    int total_s = 0, total_sk = 0, total_nf = 0, total_e = 0;
+    int total_s = 0, total_p = 0, total_sk = 0, total_nf = 0, total_e = 0;
     int artist_count = 0, album_count = 0;
 
     /* Iterate artists */
@@ -370,10 +396,10 @@ static int cmd_library(const char *library_path, int force, int num_threads)
             artist_albums++;
             album_count++;
             printf("  \u25b6 %s (%d tracks)\n", album_entry->d_name, list->count);
-            metadata_list_free(list);
 
-            sync_directory(album_dir, force, num_threads,
-                           &total_s, &total_sk, &total_nf, &total_e);
+            sync_tracks(list, force, num_threads,
+                           &total_s, &total_p, &total_sk, &total_nf, &total_e);
+            metadata_list_free(list);
             free(album_dir);
         }
 
@@ -393,7 +419,7 @@ static int cmd_library(const char *library_path, int force, int num_threads)
     printf("  Library Sync Complete\n");
     printf("  Artists:  %d\n", artist_count);
     printf("  Albums:   %d\n", album_count);
-    print_summary(total_s, total_sk, total_nf, total_e);
+    print_summary(total_s, total_p, total_sk, total_nf, total_e);
 
     return (total_e > 0) ? 1 : 0;
 }

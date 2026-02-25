@@ -1,5 +1,9 @@
 /*
  * http_client.c — HTTP client implementation using libcurl
+ *
+ * Uses thread-local CURL handles for connection pooling and reuse.
+ * Each thread gets its own handle on first use, avoiding repeated
+ * init/cleanup overhead and enabling TCP/TLS connection reuse.
  */
 
 #include "http_client.h"
@@ -8,10 +12,36 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 
-#define USER_AGENT "synclyr2metadata/1.0 (https://github.com/newtonsart/synclyr2metadata)"
+#define USER_AGENT "synclyr2metadata (https://github.com/newtonsart/synclyr2metadata)"
 
-/* ── Internal helpers ──────────────────────────────────────────────────── */
+/* ── Thread-local CURL handle ─────────────────────────────────────────── */
+
+static __thread CURL *tls_curl = NULL;
+
+/*
+ * Get or create the thread-local CURL handle.
+ * The handle is reused across all requests within the same thread,
+ * enabling HTTP keep-alive and TLS session reuse.
+ */
+static CURL *get_curl_handle(void)
+{
+    if (!tls_curl) {
+        tls_curl = curl_easy_init();
+    }
+    return tls_curl;
+}
+
+void http_thread_cleanup(void)
+{
+    if (tls_curl) {
+        curl_easy_cleanup(tls_curl);
+        tls_curl = NULL;
+    }
+}
+
+/* ── Internal helpers ─────────────────────────────────────────────────── */
 
 /*
  * libcurl write callback. Appends received data to the response buffer.
@@ -35,7 +65,7 @@ static size_t write_callback(char *data, size_t size, size_t nmemb,
     return real_size;
 }
 
-/* ── Public API ────────────────────────────────────────────────────────── */
+/* ── Public API ───────────────────────────────────────────────────────── */
 
 int http_init(void)
 {
@@ -61,6 +91,20 @@ static int is_retryable(CURLcode code)
     }
 }
 
+char *http_url_encode(const char *str)
+{
+    if (!str) return NULL;
+
+    CURL *curl = get_curl_handle();
+    if (!curl) return NULL;
+
+    char *encoded = curl_easy_escape(curl, str, 0);
+    char *result  = encoded ? strdup(encoded) : NULL;
+
+    curl_free(encoded);
+    return result;
+}
+
 HttpResponse *http_get(const char *url)
 {
     if (!url) {
@@ -70,19 +114,19 @@ HttpResponse *http_get(const char *url)
     static const int MAX_RETRIES    = 3;
     static const int BASE_DELAY_SEC = 1; /* 1s, 2s, 4s */
 
-    for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        CURL *curl = curl_easy_init();
-        if (!curl) {
-            return NULL;
-        }
+    CURL *curl = get_curl_handle();
+    if (!curl) {
+        return NULL;
+    }
 
+    for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         HttpResponse *resp = calloc(1, sizeof(HttpResponse));
         if (!resp) {
-            curl_easy_cleanup(curl);
             return NULL;
         }
 
-        /* Configure the request */
+        /* Configure the request (reset state from previous use) */
+        curl_easy_reset(curl);
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_USERAGENT, USER_AGENT);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -96,13 +140,11 @@ HttpResponse *http_get(const char *url)
         if (res == CURLE_OK) {
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE,
                               &resp->status_code);
-            curl_easy_cleanup(curl);
             return resp;
         }
 
         /* Request failed */
         http_response_free(resp);
-        curl_easy_cleanup(curl);
 
         if (attempt < MAX_RETRIES && is_retryable(res)) {
             int delay = BASE_DELAY_SEC << attempt; /* 1, 2, 4 seconds */
@@ -130,5 +172,6 @@ void http_response_free(HttpResponse *resp)
 
 void http_cleanup(void)
 {
+    http_thread_cleanup();
     curl_global_cleanup();
 }

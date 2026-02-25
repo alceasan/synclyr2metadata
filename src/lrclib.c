@@ -5,13 +5,11 @@
  * into LrclibTrack structs.
  */
 
-#define _POSIX_C_SOURCE 200809L
-
 #include "lrclib.h"
 #include "http_client.h"
 #include "../third_party/cjson/cJSON.h"
 
-#include <curl/curl.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,15 +47,6 @@ static double json_get_number(const cJSON *obj, const char *key,
 }
 
 /*
- * Get the boolean value of a cJSON field, or false if missing.
- */
-static bool json_get_bool(const cJSON *obj, const char *key)
-{
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
-    return cJSON_IsTrue(item);
-}
-
-/*
  * Parse a single JSON object into a heap-allocated LrclibTrack.
  */
 static LrclibTrack *parse_track(const cJSON *obj)
@@ -76,35 +65,12 @@ static LrclibTrack *parse_track(const cJSON *obj)
     track->artist_name  = safe_strdup(json_get_string(obj, "artistName"));
     track->album_name   = safe_strdup(json_get_string(obj, "albumName"));
     track->duration     = json_get_number(obj, "duration", 0.0);
-    track->instrumental = json_get_bool(obj, "instrumental");
-    track->plain_lyrics = safe_strdup(json_get_string(obj, "plainLyrics"));
     track->synced_lyrics = safe_strdup(json_get_string(obj, "syncedLyrics"));
+    track->plain_lyrics  = safe_strdup(json_get_string(obj, "plainLyrics"));
 
     return track;
 }
 
-/*
- * URL-encode a string using libcurl. Caller must free the result.
- */
-static char *url_encode(const char *str)
-{
-    if (!str) {
-        return NULL;
-    }
-
-    CURL *curl = curl_easy_init();
-    if (!curl) {
-        return NULL;
-    }
-
-    char *encoded = curl_easy_escape(curl, str, 0);
-    char *result  = encoded ? strdup(encoded) : NULL;
-
-    curl_free(encoded);
-    curl_easy_cleanup(curl);
-
-    return result;
-}
 
 /*
  * Perform a GET request and parse the response as JSON.
@@ -149,8 +115,8 @@ LrclibTrack *lrclib_get(const char *artist, const char *track,
         return NULL;
     }
 
-    char *enc_artist = url_encode(artist);
-    char *enc_track  = url_encode(track);
+    char *enc_artist = http_url_encode(artist);
+    char *enc_track  = http_url_encode(track);
     if (!enc_artist || !enc_track) {
         free(enc_artist);
         free(enc_track);
@@ -164,7 +130,7 @@ LrclibTrack *lrclib_get(const char *artist, const char *track,
 
     /* Append optional parameters */
     if (album) {
-        char *enc_album = url_encode(album);
+        char *enc_album = http_url_encode(album);
         if (enc_album) {
             snprintf(url + len, sizeof(url) - (size_t)len,
                      "&album_name=%s", enc_album);
@@ -202,7 +168,7 @@ void lrclib_track_free(LrclibTrack *track)
     free(track->track_name);
     free(track->artist_name);
     free(track->album_name);
-    free(track->plain_lyrics);
     free(track->synced_lyrics);
+    free(track->plain_lyrics);
     free(track);
 }

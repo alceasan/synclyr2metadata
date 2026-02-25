@@ -34,6 +34,18 @@ int http_init(void);
 HttpResponse *http_get(const char *url);
 
 /*
+ * URL-encode a string using the thread-local CURL handle.
+ * Caller must free() the result.
+ */
+char *http_url_encode(const char *str);
+
+/*
+ * Clean up the thread-local CURL handle. Call from each worker thread
+ * before it exits to release the per-thread handle.
+ */
+void http_thread_cleanup(void);
+
+/*
  * Free an HttpResponse previously returned by http_get().
  * Safe to call with NULL.
  */

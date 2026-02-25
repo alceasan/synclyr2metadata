@@ -8,7 +8,6 @@
 #ifndef LRCLIB_H
 #define LRCLIB_H
 
-#include <stdbool.h>
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
@@ -18,9 +17,8 @@ typedef struct {
     char  *artist_name;
     char  *album_name;
     double duration;
-    bool   instrumental;
-    char  *plain_lyrics;
     char  *synced_lyrics;
+    char  *plain_lyrics;
 } LrclibTrack;
 
 /* ── Public API ────────────────────────────────────────────────────────── */
