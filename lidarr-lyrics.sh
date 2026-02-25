@@ -12,9 +12,16 @@
 
 BIN="/config/scripts/synclyr2metadata"
 LOG="/config/scripts/synclyr2metadata.log"
+MAX_LOG_SIZE=102400  # 100KB
 THREADS=4
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
+
+# ── Rotate log if too large ────────────────────────────────────────────
+
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt "$MAX_LOG_SIZE" ]; then
+    tail -200 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
 
 # ── Auto-install runtime dependencies if missing ───────────────────────
 
