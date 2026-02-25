@@ -1,10 +1,7 @@
 # ── synclyr2metadata Makefile ──────────────────────────────────────────
 #
-# Default build compiles inside an Alpine Docker container so the
-# resulting binary is compatible with Lidarr/Navidrome Docker images.
-#
-#   make            → Alpine build via Docker (recommended)
-#   make native     → Local build (needs libcurl-dev, taglib-dev)
+#   make            → Static build via Docker (zero dependencies, recommended)
+#   make native     → Local dynamic build (needs libcurl-dev, taglib-dev)
 #   make install    → Install to /usr/local/bin
 #   make clean      → Remove build artifacts
 #
@@ -20,8 +17,10 @@ BUILD_DIR = build
 
 SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/http_client.c \
+       $(SRC_DIR)/lidarr.c \
        $(SRC_DIR)/lrclib.c \
        $(SRC_DIR)/metadata.c \
+       $(SRC_DIR)/sync.c \
        $(THIRD_DIR)/cJSON.c
 
 OBJS = $(SRCS:%.c=$(BUILD_DIR)/%.o)
@@ -33,13 +32,30 @@ PREFIX ?= /usr/local
 
 .PHONY: all native clean debug install uninstall
 
-# Default: build inside Alpine Docker (portable, works in Lidarr/Docker)
+# Default: static build via Docker (self-contained, works everywhere)
 all:
 	docker run --rm -v "$$(pwd)":/build -w /build alpine:3.22 sh -c " \
-		apk add build-base curl-dev taglib-dev && \
-		make native"
+		apk add build-base cmake git pkgconf curl-dev curl-static \
+			openssl-libs-static zlib-static brotli-static nghttp2-static \
+			zstd-static libidn2-static libunistring-static libpsl-static \
+			c-ares-dev && \
+		cd /tmp && \
+		git clone --depth 1 --branch v2.0.2 https://github.com/taglib/taglib.git && \
+		cd taglib && git submodule update --init && \
+		cmake -B build -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_INSTALL_PREFIX=/usr -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF && \
+		cmake --build build -j\$$(nproc) && \
+		cmake --install build && \
+		cd /build && \
+		make native \
+			LDFLAGS='-static \
+				/usr/lib/libtag_c.a /usr/lib/libtag.a \
+				-lcurl -lssl -lcrypto -lz -lbrotlidec -lbrotlicommon \
+				-lzstd -lnghttp2 -lpsl -lidn2 -lunistring -lcares \
+				-lstdc++ -lm -lpthread' && \
+		strip /build/synclyr2metadata"
 
-# Local build (requires libcurl-dev + taglib-dev on your system)
+# Local dynamic build (requires libcurl-dev + taglib-dev on your system)
 native: clean $(TARGET)
 
 $(TARGET): $(OBJS)

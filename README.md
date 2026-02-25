@@ -16,17 +16,16 @@ Supports **FLAC**, **MP3**, **OGG**, **M4A/AAC**, **OPUS**, and more (powered by
 
 ## 🎵 Lidarr Integration
 
-Auto-sync lyrics every time Lidarr imports a new album. Choose the section that matches your setup:
+Auto-sync lyrics every time Lidarr imports a new album.  
+**Only one file to deploy** — the binary is fully static with zero runtime dependencies.
 
 ---
 
 ### 🐳 Option A: Lidarr running in Docker
 
-> This is the most common setup (Hotio or LinuxServer images on Alpine Linux).
+> Most common setup (Hotio or LinuxServer images on Alpine Linux).
 
 #### 1. Build
-
-The default `make` cross-compiles inside an Alpine Docker container, producing a binary compatible with Docker-based Lidarr images:
 
 ```bash
 sudo apt install build-essential docker.io   # host prerequisites
@@ -35,48 +34,26 @@ cd synclyr2metadata
 make
 ```
 
+> Builds a **static binary** (~8MB) inside an Alpine Docker container. No modifications to your `docker-compose.yml` needed.
+
 #### 2. Deploy
 
-Copy the binary and script into your Lidarr container's config volume:
+Copy the binary into your Lidarr container's config volume:
 
 ```bash
-mkdir -p /path/to/lidarr/config/scripts
 cp synclyr2metadata /path/to/lidarr/config/scripts/
-cp lidarr-lyrics.sh /path/to/lidarr/config/scripts/
 ```
 
 > Replace `/path/to/lidarr/config` with your actual Lidarr config mount (e.g. `./config` or `/opt/media-stack/config/lidarr`).
 
-#### 3. Install runtime dependencies
-
-The binary needs `libcurl` and `libtag_c` inside the container. Add these to your `docker-compose.yml`:
-
-**Hotio images:**
-```yaml
-environment:
-  - APKPKGS=curl taglib
-```
-
-**LinuxServer images:**
-```yaml
-environment:
-  - INSTALL_PACKAGES=curl taglib
-```
-
-Then recreate the container:
-
-```bash
-docker compose down && docker compose up -d
-```
-
-#### 4. Enable the Custom Script
+#### 3. Enable the Custom Script
 
 1. Open Lidarr UI → **Settings → Connect → + → Custom Script**.
 2. Configure:
    - **Name**: `Sync Lyrics`
    - **On Release Import**: ✓
    - **On Upgrade**: ✓
-   - **Path**: `/config/scripts/lidarr-lyrics.sh`
+   - **Path**: `/config/scripts/synclyr2metadata`
 3. Click **Test**, then **Save**.
 
 Logs: `/config/scripts/synclyr2metadata.log` (auto-rotated at 100KB).
@@ -102,29 +79,25 @@ cd synclyr2metadata
 make native
 ```
 
-#### 2. Install system-wide
+#### 2. Deploy
 
 ```bash
 sudo make install      # installs to /usr/local/bin
 ```
 
-#### 3. Deploy the custom script
-
+Or copy manually to a directory Lidarr can access:
 ```bash
-mkdir -p /path/to/lidarr/scripts
-cp lidarr-lyrics.sh /path/to/lidarr/scripts/
+cp synclyr2metadata /path/to/lidarr/scripts/
 ```
 
-> Make sure the script path and the binary are both accessible by the user running Lidarr.
-
-#### 4. Enable the Custom Script
+#### 3. Enable the Custom Script
 
 1. Open Lidarr UI → **Settings → Connect → + → Custom Script**.
 2. Configure:
    - **Name**: `Sync Lyrics`
    - **On Release Import**: ✓
    - **On Upgrade**: ✓
-   - **Path**: `/path/to/lidarr/scripts/lidarr-lyrics.sh`
+   - **Path**: `/path/to/synclyr2metadata`
 3. Click **Test**, then **Save**.
 
 ---

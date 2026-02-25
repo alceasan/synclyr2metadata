@@ -189,61 +189,6 @@ TrackMetaList *metadata_scan_dir(const char *dirpath)
     return list;
 }
 
-
-int metadata_write_lyrics(const char *filepath, const char *lyrics)
-{
-    if (!filepath || !lyrics) {
-        return -1;
-    }
-
-    TagLib_File *file = taglib_file_new(filepath);
-    if (!file || !taglib_file_is_valid(file)) {
-        if (file) {
-            taglib_file_free(file);
-        }
-        fprintf(stderr, "error: could not open '%s' for writing\n", filepath);
-        return -1;
-    }
-
-    taglib_property_set(file, "LYRICS", lyrics);
-
-    int result = 0;
-    if (!taglib_file_save(file)) {
-        fprintf(stderr, "error: failed to save '%s'\n", filepath);
-        result = -1;
-    }
-
-    taglib_file_free(file);
-    return result;
-}
-
-int metadata_has_lyrics(const char *filepath)
-{
-    if (!filepath) {
-        return -1;
-    }
-
-    TagLib_File *file = taglib_file_new(filepath);
-    if (!file || !taglib_file_is_valid(file)) {
-        if (file) {
-            taglib_file_free(file);
-        }
-        return -1;
-    }
-
-    char **values = taglib_property_get(file, "LYRICS");
-    int has = 0;
-
-    if (values && values[0] && values[0][0] != '\0') {
-        has = 1;
-    }
-
-    taglib_property_free(values);
-    taglib_file_free(file);
-
-    return has;
-}
-
 int metadata_sync_lyrics(const char *filepath, const char *lyrics, int force)
 {
     if (!filepath || !lyrics) {

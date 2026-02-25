@@ -41,12 +41,6 @@ TrackMeta *metadata_read(const char *filepath);
 TrackMetaList *metadata_scan_dir(const char *dirpath);
 
 /*
- * Write synced lyrics (LRC format) into the audio file's LYRICS tag.
- * Returns 0 on success, -1 on failure.
- */
-int metadata_write_lyrics(const char *filepath, const char *lyrics);
-
-/*
  * Check and write lyrics in a single TagLib file open.
  * If force=0 and lyrics already exist, skips writing.
  *
@@ -55,12 +49,6 @@ int metadata_write_lyrics(const char *filepath, const char *lyrics);
  *          -1 = error (could not open/save file)
  */
 int metadata_sync_lyrics(const char *filepath, const char *lyrics, int force);
-
-/*
- * Check if an audio file already has embedded lyrics.
- * Returns 1 if lyrics exist, 0 if not, -1 on error.
- */
-int metadata_has_lyrics(const char *filepath);
 
 /* ── Memory management ─────────────────────────────────────────────────── */
 

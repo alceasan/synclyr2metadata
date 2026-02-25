@@ -12,13 +12,8 @@
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
 typedef struct {
-    int    id;
-    char  *track_name;
-    char  *artist_name;
-    char  *album_name;
-    double duration;
-    char  *synced_lyrics;
-    char  *plain_lyrics;
+    char *synced_lyrics;
+    char *plain_lyrics;
 } LrclibTrack;
 
 /* ── Public API ────────────────────────────────────────────────────────── */

@@ -11,7 +11,7 @@
 #include <curl/curl.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <time.h>
 #include <pthread.h>
 
 #define USER_AGENT "synclyr2metadata (https://github.com/newtonsart/synclyr2metadata)"
@@ -150,7 +150,8 @@ HttpResponse *http_get(const char *url)
             int delay = BASE_DELAY_SEC << attempt; /* 1, 2, 4 seconds */
             fprintf(stderr, "warning: %s, retrying in %ds (%d/%d)...\n",
                     curl_easy_strerror(res), delay, attempt + 1, MAX_RETRIES);
-            sleep((unsigned)delay);
+            struct timespec ts = { .tv_sec = delay, .tv_nsec = 0 };
+            nanosleep(&ts, NULL);
         } else {
             fprintf(stderr, "error: HTTP request failed: %s\n",
                     curl_easy_strerror(res));

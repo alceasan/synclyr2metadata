@@ -7,8 +7,7 @@
 
 #include "lrclib.h"
 #include "http_client.h"
-#include "../third_party/cjson/cJSON.h"
-
+#include "cJSON.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,14 +19,6 @@
 /* ── Internal helpers ──────────────────────────────────────────────────── */
 
 /*
- * Duplicate a string safely. Returns NULL if `src` is NULL.
- */
-static char *safe_strdup(const char *src)
-{
-    return src ? strdup(src) : NULL;
-}
-
-/*
  * Get the string value of a cJSON field, or NULL if missing/wrong type.
  */
 static const char *json_get_string(const cJSON *obj, const char *key)
@@ -37,17 +28,8 @@ static const char *json_get_string(const cJSON *obj, const char *key)
 }
 
 /*
- * Get the number value of a cJSON field, or `fallback` if missing.
- */
-static double json_get_number(const cJSON *obj, const char *key,
-                               double fallback)
-{
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
-    return cJSON_IsNumber(item) ? item->valuedouble : fallback;
-}
-
-/*
- * Parse a single JSON object into a heap-allocated LrclibTrack.
+ * Parse a JSON object into a heap-allocated LrclibTrack.
+ * Only extracts the lyrics fields we actually use.
  */
 static LrclibTrack *parse_track(const cJSON *obj)
 {
@@ -55,18 +37,16 @@ static LrclibTrack *parse_track(const cJSON *obj)
         return NULL;
     }
 
+    const char *synced = json_get_string(obj, "syncedLyrics");
+    const char *plain  = json_get_string(obj, "plainLyrics");
+
     LrclibTrack *track = calloc(1, sizeof(LrclibTrack));
     if (!track) {
         return NULL;
     }
 
-    track->id           = (int)json_get_number(obj, "id", 0);
-    track->track_name   = safe_strdup(json_get_string(obj, "trackName"));
-    track->artist_name  = safe_strdup(json_get_string(obj, "artistName"));
-    track->album_name   = safe_strdup(json_get_string(obj, "albumName"));
-    track->duration     = json_get_number(obj, "duration", 0.0);
-    track->synced_lyrics = safe_strdup(json_get_string(obj, "syncedLyrics"));
-    track->plain_lyrics  = safe_strdup(json_get_string(obj, "plainLyrics"));
+    track->synced_lyrics = synced ? strdup(synced) : NULL;
+    track->plain_lyrics  = plain  ? strdup(plain)  : NULL;
 
     return track;
 }
@@ -165,9 +145,6 @@ void lrclib_track_free(LrclibTrack *track)
     if (!track) {
         return;
     }
-    free(track->track_name);
-    free(track->artist_name);
-    free(track->album_name);
     free(track->synced_lyrics);
     free(track->plain_lyrics);
     free(track);
