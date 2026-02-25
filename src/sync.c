@@ -11,6 +11,7 @@
 #include "metadata.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 
@@ -23,6 +24,8 @@ typedef struct {
     SyncResult           result;
     SyncProgressFn       progress;
     void                *user;
+    FILE                *plain_file;
+    FILE                *missing_file;
     pthread_mutex_t      mutex;
 } SyncContext;
 
@@ -48,8 +51,7 @@ static void process_track(const TrackMeta *t, int force,
     /* Exact match: artist+title first, then with album+duration */
     LrclibTrack *lrc = lrclib_get(t->artist, t->title, NULL, 0);
 
-    if ((!lrc || !lrc->synced_lyrics || lrc->synced_lyrics[0] == '\0')
-        && t->album) {
+    if ((!lrc || (!lrc->synced_lyrics && !lrc->instrumental)) && t->album) {
         lrclib_track_free(lrc);
         lrc = lrclib_get(t->artist, t->title, t->album, (double)t->duration);
     }
@@ -60,11 +62,15 @@ static void process_track(const TrackMeta *t, int force,
         return;
     }
 
-    /* Pick best available lyrics: synced first, then plain */
+    /* Pick best available lyrics: synced first, then plain, then instrumental */
     const char *lyrics = NULL;
     int is_synced = 0;
+    int is_inst = 0;
 
-    if (lrc->synced_lyrics && lrc->synced_lyrics[0] != '\0') {
+    if (lrc->instrumental) {
+        *out_status = "\xe2\x9c\x93 instrumental";
+        is_inst = 1;
+    } else if (lrc->synced_lyrics && lrc->synced_lyrics[0] != '\0') {
         lyrics = lrc->synced_lyrics;
         *out_status = "\xe2\x9c\x93 synced";
         is_synced = 1;
@@ -73,9 +79,16 @@ static void process_track(const TrackMeta *t, int force,
         *out_status = "\xe2\x9c\x93 plain";
     }
 
-    if (!lyrics) {
+    if (!lyrics && !is_inst) {
         *out_not_found = 1;
         *out_status = "\xe2\x9c\x97 not found";
+        lrclib_track_free(lrc);
+        return;
+    }
+
+    if (is_inst) {
+        /* User requested NOT to write [Instrumental] tags */
+        *out_synced = 1; /* Count as success */
         lrclib_track_free(lrc);
         return;
     }
@@ -122,6 +135,15 @@ static void *sync_worker(void *arg)
         ctx->result.not_found += nf;
         ctx->result.errors    += e;
 
+        if (p && ctx->plain_file) {
+            fprintf(ctx->plain_file, "%s\n", t->filepath);
+            fflush(ctx->plain_file);
+        }
+        if (nf && ctx->missing_file) {
+            fprintf(ctx->missing_file, "%s\n", t->filepath);
+            fflush(ctx->missing_file);
+        }
+
         if (ctx->progress) {
             ctx->progress(idx, ctx->list->count,
                           t->title ? t->title : "(unknown)",
@@ -138,8 +160,9 @@ static void *sync_worker(void *arg)
 /* ── Public API ───────────────────────────────────────────────────────── */
 
 SyncResult sync_tracks(const TrackMetaList *list, int force,
-                        int num_threads, SyncProgressFn progress,
-                        void *user)
+                         const char *out_plain, const char *out_missing,
+                         int num_threads, SyncProgressFn progress,
+                         void *user)
 {
     SyncResult empty = {0};
     if (!list || list->count == 0) return empty;
@@ -147,12 +170,14 @@ SyncResult sync_tracks(const TrackMetaList *list, int force,
     int t = num_threads > list->count ? list->count : num_threads;
 
     SyncContext ctx = {
-        .list       = list,
-        .force      = force,
-        .next_index = 0,
-        .result     = {0},
-        .progress   = progress,
-        .user       = user,
+        .list         = list,
+        .force        = force,
+        .next_index   = 0,
+        .result       = {0},
+        .progress     = progress,
+        .user         = user,
+        .plain_file   = out_plain ? fopen(out_plain, "a") : NULL,
+        .missing_file = out_missing ? fopen(out_missing, "a") : NULL
     };
     pthread_mutex_init(&ctx.mutex, NULL);
 
@@ -166,6 +191,9 @@ SyncResult sync_tracks(const TrackMetaList *list, int force,
 
     free(threads);
     pthread_mutex_destroy(&ctx.mutex);
+
+    if (ctx.plain_file) fclose(ctx.plain_file);
+    if (ctx.missing_file) fclose(ctx.missing_file);
 
     return ctx.result;
 }

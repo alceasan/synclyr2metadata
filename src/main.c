@@ -29,12 +29,14 @@ static void print_usage(const char *progname)
         "  %s --library \"/path/to/music\"   [--force] [--threads N]\n"
         "\n"
         "Options:\n"
-        "  --sync     Sync lyrics for a single album directory\n"
-        "  --artist   Sync lyrics for all albums of an artist\n"
-        "  --library  Sync lyrics for an entire library (artist/album)\n"
-        "  --force    Overwrite existing lyrics\n"
-        "  --threads  Number of parallel threads (default: 4, max: 16)\n"
-        "  --help     Show this help message\n",
+        "  --sync         Sync lyrics for a single album directory\n"
+        "  --artist       Sync lyrics for all albums of an artist\n"
+        "  --library      Sync lyrics for an entire library (artist/album)\n"
+        "  --force        Overwrite existing lyrics\n"
+        "  --threads      Number of parallel threads (default: 4, max: 16)\n"
+        "  --out-plain    File to log paths of tracks that got plain lyrics\n"
+        "  --out-missing  File to log paths of tracks with no lyrics found\n"
+        "  --help         Show this help message\n",
         progname, progname, progname);
 }
 
@@ -92,7 +94,9 @@ static void result_add(SyncResult *total, const SyncResult *r)
 /*
  * --sync: sync a single album directory
  */
-static int cmd_sync(const char *dirpath, int force, int num_threads)
+static int cmd_sync(const char *dirpath, int force,
+                    const char *out_plain, const char *out_missing,
+                    int num_threads)
 {
     TrackMetaList *list = metadata_scan_dir(dirpath);
     if (!list || list->count == 0) {
@@ -104,7 +108,8 @@ static int cmd_sync(const char *dirpath, int force, int num_threads)
     printf("Syncing lyrics for %d track(s) in '%s' [%d threads]...\n\n",
            list->count, dirpath, num_threads);
 
-    SyncResult r = sync_tracks(list, force, num_threads, cli_progress, NULL);
+    SyncResult r = sync_tracks(list, force, out_plain, out_missing,
+                               num_threads, cli_progress, NULL);
     metadata_list_free(list);
     print_summary(&r);
 
@@ -114,7 +119,9 @@ static int cmd_sync(const char *dirpath, int force, int num_threads)
 /*
  * --artist: sync all album subdirectories under an artist
  */
-static int cmd_artist(const char *artist_path, int force, int num_threads)
+static int cmd_artist(const char *artist_path, int force,
+                      const char *out_plain, const char *out_missing,
+                      int num_threads)
 {
     DIR *dir = opendir(artist_path);
     if (!dir) {
@@ -155,7 +162,8 @@ static int cmd_artist(const char *artist_path, int force, int num_threads)
         album_count++;
         printf("\u25b6 %s (%d tracks)\n", entry->d_name, list->count);
 
-        SyncResult r = sync_tracks(list, force, num_threads, cli_progress, NULL);
+        SyncResult r = sync_tracks(list, force, out_plain, out_missing,
+                                   num_threads, cli_progress, NULL);
         result_add(&total, &r);
         metadata_list_free(list);
         printf("\n");
@@ -178,7 +186,9 @@ static int cmd_artist(const char *artist_path, int force, int num_threads)
 /*
  * --library: scan artist/album structure and sync everything
  */
-static int cmd_library(const char *library_path, int force, int num_threads)
+static int cmd_library(const char *library_path, int force,
+                       const char *out_plain, const char *out_missing,
+                       int num_threads)
 {
     DIR *dir = opendir(library_path);
     if (!dir) {
@@ -248,8 +258,8 @@ static int cmd_library(const char *library_path, int force, int num_threads)
             album_count++;
             printf("  \u25b6 %s (%d tracks)\n", album_entry->d_name, list->count);
 
-            SyncResult r = sync_tracks(list, force, num_threads,
-                                        cli_progress, NULL);
+            SyncResult r = sync_tracks(list, force, out_plain, out_missing,
+                                       num_threads, cli_progress, NULL);
             result_add(&total, &r);
             metadata_list_free(list);
             free(album_dir);
@@ -323,6 +333,8 @@ int main(int argc, char **argv)
     const char *sync_dir    = find_arg(argc, argv, "--sync");
     const char *artist_dir  = find_arg(argc, argv, "--artist");
     const char *library_dir = find_arg(argc, argv, "--library");
+    const char *out_plain   = find_arg(argc, argv, "--out-plain");
+    const char *out_missing = find_arg(argc, argv, "--out-missing");
 
     if (sync_dir || artist_dir || library_dir) {
         /* ── All sync modes require HTTP ─────────────────────────── */
@@ -332,11 +344,11 @@ int main(int argc, char **argv)
         }
 
         if (library_dir) {
-            exit_code = cmd_library(library_dir, force, num_threads);
+            exit_code = cmd_library(library_dir, force, out_plain, out_missing, num_threads);
         } else if (artist_dir) {
-            exit_code = cmd_artist(artist_dir, force, num_threads);
+            exit_code = cmd_artist(artist_dir, force, out_plain, out_missing, num_threads);
         } else {
-            exit_code = cmd_sync(sync_dir, force, num_threads);
+            exit_code = cmd_sync(sync_dir, force, out_plain, out_missing, num_threads);
         }
 
         http_cleanup();

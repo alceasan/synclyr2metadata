@@ -34,15 +34,15 @@
 static FILE *log_fp = NULL;
 
 /*
- * Derive the log file path from the binary's own path.
- * "/config/scripts/synclyr2metadata" → "/config/scripts/synclyr2metadata.log"
+ * Derive a log file path from the binary's own path plus a suffix.
+ * e.g. "/config/scripts/synclyr2metadata" + ".log"
  */
-static char *log_path_from_binary(const char *self_path)
+static char *log_path_suffix(const char *self_path, const char *suffix)
 {
-    size_t len = strlen(self_path) + 5; /* ".log\0" */
+    size_t len = strlen(self_path) + strlen(suffix) + 1;
     char *path = malloc(len);
     if (path) {
-        snprintf(path, len, "%s.log", self_path);
+        snprintf(path, len, "%s%s", self_path, suffix);
     }
     return path;
 }
@@ -216,7 +216,7 @@ static void lidarr_progress(int idx, int total, const char *title,
 /*
  * Scan and sync a single directory, logging results.
  */
-static void lidarr_sync_dir(const char *dirpath)
+static void lidarr_sync_dir(const char *dirpath, const char *plain_log, const char *missing_log)
 {
     TrackMetaList *list = metadata_scan_dir(dirpath);
     if (!list || list->count == 0) {
@@ -227,8 +227,8 @@ static void lidarr_sync_dir(const char *dirpath)
 
     log_msg("Syncing %d track(s) in '%s'", list->count, dirpath);
 
-    SyncResult r = sync_tracks(list, 0, LIDARR_THREADS,
-                                lidarr_progress, NULL);
+    SyncResult r = sync_tracks(list, 0, plain_log, missing_log,
+                                LIDARR_THREADS, lidarr_progress, NULL);
     metadata_list_free(list);
 
     log_msg("Done: %d synced, %d plain, %d skipped, %d not found",
@@ -245,11 +245,14 @@ int lidarr_detect(void)
 int lidarr_run(const char *self_path)
 {
     /* Set up logging next to the binary */
-    char *logpath = log_path_from_binary(self_path);
+    char *logpath = log_path_suffix(self_path, ".log");
     if (logpath) {
         log_open(logpath);
         free(logpath);
     }
+
+    char *plain_log = log_path_suffix(self_path, "_plain.log");
+    char *missing_log = log_path_suffix(self_path, "_missing.log");
 
     /* Read event type */
     const char *event = getenv("lidarr_eventtype");
@@ -287,7 +290,7 @@ int lidarr_run(const char *self_path)
 
     if (album_dir && album_dir[0] != '\0') {
         log_msg("Album: %s", album_dir);
-        lidarr_sync_dir(album_dir);
+        lidarr_sync_dir(album_dir, plain_log, missing_log);
     } else if (artist_path) {
         log_msg("Album dir not found, syncing artist: %s", artist_path);
         /* Iterate artist subdirs */
@@ -303,7 +306,7 @@ int lidarr_run(const char *self_path)
 
                 struct stat st;
                 if (stat(sub, &st) == 0 && S_ISDIR(st.st_mode)) {
-                    lidarr_sync_dir(sub);
+                    lidarr_sync_dir(sub, plain_log, missing_log);
                 }
                 free(sub);
             }
@@ -314,6 +317,8 @@ int lidarr_run(const char *self_path)
     }
 
     free(album_dir);
+    free(plain_log);
+    free(missing_log);
     http_cleanup();
 
     if (log_fp) fclose(log_fp);

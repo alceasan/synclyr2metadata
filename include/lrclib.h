@@ -14,6 +14,7 @@
 typedef struct {
     char *synced_lyrics;
     char *plain_lyrics;
+    int   instrumental;
 } LrclibTrack;
 
 /* ── Public API ────────────────────────────────────────────────────────── */

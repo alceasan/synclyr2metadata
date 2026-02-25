@@ -54,7 +54,8 @@ typedef void (*SyncProgressFn)(int idx, int total,
  * Returns aggregated results.
  */
 SyncResult sync_tracks(const TrackMetaList *list, int force,
-                        int num_threads, SyncProgressFn progress,
-                        void *user);
+                         const char *out_plain, const char *out_missing,
+                         int num_threads, SyncProgressFn progress,
+                         void *user);
 
 #endif /* SYNC_H */

@@ -56,9 +56,10 @@ cp synclyr2metadata /path/to/lidarr/config/scripts/
    - **Path**: `/config/scripts/synclyr2metadata`
 3. Click **Test**, then **Save**.
 
-Logs: `/config/scripts/synclyr2metadata.log` (auto-rotated at 100KB).
-
----
+Logs are automatically generated in the same folder:
+- `/config/scripts/synclyr2metadata.log` (General execution log)
+- `/config/scripts/synclyr2metadata_plain.log` (Tracks that only got plain/unsynced lyrics)
+- `/config/scripts/synclyr2metadata_missing.log` (Tracks that couldn't be found on LRCLIB)---
 
 ### 💻 Option B: Lidarr installed natively
 
@@ -100,6 +101,11 @@ cp synclyr2metadata /path/to/lidarr/scripts/
    - **Path**: `/path/to/synclyr2metadata`
 3. Click **Test**, then **Save**.
 
+Logs are automatically generated in the same folder as the binary:
+- `synclyr2metadata.log`
+- `synclyr2metadata_plain.log`
+- `synclyr2metadata_missing.log`
+
 ---
 
 ## 🛠 Manual CLI Usage
@@ -115,6 +121,9 @@ You can also use `synclyr2metadata` directly from the command line:
 
 # Sync your entire library (Artist/Album structure)
 ./synclyr2metadata --library "/path/to/music" --threads 4
+
+# Export paths of tracks that only got plain lyrics and tracks with missing lyrics
+./synclyr2metadata --library "/path/to/music" --out-plain ./plain.txt --out-missing ./missing.txt
 ```
 
 ### Options
@@ -124,6 +133,8 @@ You can also use `synclyr2metadata` directly from the command line:
 | `--sync PATH` | Sync lyrics for a single album directory |
 | `--artist PATH` | Sync all albums under an artist directory |
 | `--library PATH` | Sync entire library (artist/album structure) |
+| `--out-plain FILE` | Write paths of tracks falling back to unsynced lyrics to file |
+| `--out-missing FILE` | Write paths of tracks not found on LRCLIB to file |
 | `--force` | Overwrite existing embedded lyrics |
 | `--threads N` | Parallel download threads (default: 4, max: 16) |
 | `--help` | Show help |

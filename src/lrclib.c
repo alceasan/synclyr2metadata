@@ -39,6 +39,7 @@ static LrclibTrack *parse_track(const cJSON *obj)
 
     const char *synced = json_get_string(obj, "syncedLyrics");
     const char *plain  = json_get_string(obj, "plainLyrics");
+    cJSON *inst_item   = cJSON_GetObjectItemCaseSensitive(obj, "instrumental");
 
     LrclibTrack *track = calloc(1, sizeof(LrclibTrack));
     if (!track) {
@@ -47,6 +48,7 @@ static LrclibTrack *parse_track(const cJSON *obj)
 
     track->synced_lyrics = synced ? strdup(synced) : NULL;
     track->plain_lyrics  = plain  ? strdup(plain)  : NULL;
+    track->instrumental  = cJSON_IsTrue(inst_item) ? 1 : 0;
 
     return track;
 }
