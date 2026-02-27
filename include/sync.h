@@ -43,19 +43,27 @@ typedef void (*SyncProgressFn)(int idx, int total,
 /* ── Public API ────────────────────────────────────────────────────────── */
 
 /*
+ * Configuration for a synchronization run.
+ */
+typedef struct {
+    int   force;         /* 1 = overwrite existing lyrics, 0 = skip */
+    int   clean_lrc;     /* 1 = delete local .lrc file after embedding */
+    int   num_threads;   /* number of parallel workers */
+    char *out_plain;     /* file path for plain lyrics log */
+    char *out_missing;   /* file path for missing lyrics log */
+} SyncConfig;
+
+/*
  * Sync lyrics for all tracks in `list`.
  *
- *   list        — pre-scanned track list (caller owns it)
- *   force       — if non-zero, overwrite existing lyrics
- *   num_threads — number of worker threads (clamped to list size)
- *   progress    — per-track callback (may be NULL)
- *   user        — opaque pointer forwarded to the callback
+ *   list     — pre-scanned track list (caller owns it)
+ *   config   — settings for the sync run
+ *   progress — per-track callback (may be NULL)
+ *   user     — opaque pointer forwarded to the callback
  *
  * Returns aggregated results.
  */
-SyncResult sync_tracks(const TrackMetaList *list, int force,
-                         const char *out_plain, const char *out_missing,
-                         int num_threads, SyncProgressFn progress,
-                         void *user);
+SyncResult sync_tracks(const TrackMetaList *list, const SyncConfig *config,
+                         SyncProgressFn progress, void *user);
 
 #endif /* SYNC_H */

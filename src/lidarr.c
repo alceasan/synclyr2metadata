@@ -227,8 +227,15 @@ static void lidarr_sync_dir(const char *dirpath, const char *plain_log, const ch
 
     log_msg("Syncing %d track(s) in '%s'", list->count, dirpath);
 
-    SyncResult r = sync_tracks(list, 0, plain_log, missing_log,
-                                LIDARR_THREADS, lidarr_progress, NULL);
+    SyncConfig config = {
+        .force       = 0,
+        .clean_lrc   = 0,  /* Safe default for Lidarr */
+        .num_threads = LIDARR_THREADS,
+        .out_plain   = (char *)plain_log,
+        .out_missing = (char *)missing_log
+    };
+
+    SyncResult r = sync_tracks(list, &config, lidarr_progress, NULL);
     metadata_list_free(list);
 
     log_msg("Done: %d synced, %d plain, %d skipped, %d not found",

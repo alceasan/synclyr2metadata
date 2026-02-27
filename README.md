@@ -1,14 +1,15 @@
 # synclyr2metadata
 
-A lightweight command-line tool that automatically downloads synchronized lyrics (LRC format) from [LRCLIB](https://lrclib.net) and **embeds them directly into your audio files' metadata**.
+A lightweight command-line tool that reads local `.lrc` files or automatically downloads synchronized lyrics from [LRCLIB](https://lrclib.net) and **embeds them directly into your audio files' metadata**.
 
 Perfect for use with **Lidarr**, **Navidrome**, **Jellyfin**, **Plex**, or any music player that reads embedded lyrics.
 
 ## What does it do?
 
 1. Scans your audio files and reads their metadata (Artist, Title, Album, Duration).
-2. Searches for synchronized lyrics on LRCLIB. Falls back to plain lyrics when synced aren't available.
-3. Embeds the lyrics permanently into the file's `LYRICS` tag — no separate `.lrc` files needed.
+2. Looks for a local `.lrc` sidecar file with the same name. If found, it embeds it directly to save time.
+3. If no local file exists, searches for synchronized lyrics on LRCLIB. Falls back to plain lyrics when synced aren't available.
+4. Embeds the lyrics permanently into the file's `LYRICS` tag — no separate `.lrc` files needed.
 
 Supports **FLAC**, **MP3**, **OGG**, **M4A/AAC**, **OPUS**, and more (powered by [TagLib](https://taglib.org/)).
 
@@ -114,7 +115,7 @@ You can also use `synclyr2metadata` directly from the command line:
 
 ```bash
 # Sync a single album
-./synclyr2metadata --sync "/path/to/Artist/Album (2024)"
+./synclyr2metadata --album "/path/to/Artist/Album (2024)"
 
 # Sync all albums from an artist
 ./synclyr2metadata --artist "/path/to/Artist" --threads 8
@@ -124,18 +125,22 @@ You can also use `synclyr2metadata` directly from the command line:
 
 # Export paths of tracks that only got plain lyrics and tracks with missing lyrics
 ./synclyr2metadata --library "/path/to/music" --out-plain ./plain.txt --out-missing ./missing.txt
+
+# Sync a directory and delete original .lrc sidecar files after embedding them
+./synclyr2metadata --album "/path/to/downloaded_album" --clean-lrc
 ```
 
 ### Options
 
 | Option | Description |
 |---|---|
-| `--sync PATH` | Sync lyrics for a single album directory |
+| `--album PATH` | Sync lyrics for a single album directory |
 | `--artist PATH` | Sync all albums under an artist directory |
 | `--library PATH` | Sync entire library (artist/album structure) |
 | `--out-plain FILE` | Write paths of tracks falling back to unsynced lyrics to file |
 | `--out-missing FILE` | Write paths of tracks not found on LRCLIB to file |
 | `--force` | Overwrite existing embedded lyrics |
+| `--clean-lrc` | Delete local `.lrc` file after successfully embedding it |
 | `--threads N` | Parallel download threads (default: 4, max: 16) |
 | `--help` | Show help |
 

@@ -13,13 +13,15 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 
 /* ── Internal context ─────────────────────────────────────────────────── */
 
 typedef struct {
     const TrackMetaList *list;
-    int                  force;
+    const SyncConfig    *config;
     int                  next_index;
     SyncResult           result;
     SyncProgressFn       progress;
@@ -31,35 +33,77 @@ typedef struct {
 
 /* ── Track processing ─────────────────────────────────────────────────── */
 
-/*
- * Process a single track: look up lyrics on LRCLIB and write to file.
- * Sets exactly one of the output counters to 1.
- */
-static void process_track(const TrackMeta *t, int force,
-                          int *out_synced, int *out_plain,
-                          int *out_skipped, int *out_not_found,
-                          int *out_error, const char **out_status)
+static int try_local_lrc(const TrackMeta *t, const SyncConfig *cfg,
+                         int *out_synced, int *out_skipped,
+                         int *out_error, const char **out_status)
 {
-    *out_synced = *out_plain = *out_skipped = *out_not_found = *out_error = 0;
-
-    if (!t->artist || !t->title) {
-        *out_not_found = 1;
-        *out_status = "\xe2\x9c\x97 missing metadata";
-        return;
+    char lrc_path[4096];
+    snprintf(lrc_path, sizeof(lrc_path), "%s", t->filepath);
+    char *dot = strrchr(lrc_path, '.');
+    if (dot != NULL) {
+        strcpy(dot, ".lrc");
+    } else {
+        strncat(lrc_path, ".lrc", sizeof(lrc_path) - strlen(lrc_path) - 1);
     }
 
-    /* Exact match: artist+title first, then with album+duration */
-    LrclibTrack *lrc = lrclib_get(t->artist, t->title, NULL, 0);
+    FILE *f_lrc = fopen(lrc_path, "rb");
+    if (!f_lrc) return 0;
 
-    if ((!lrc || (!lrc->synced_lyrics && !lrc->instrumental)) && t->album) {
+    fseek(f_lrc, 0, SEEK_END);
+    long length = ftell(f_lrc);
+    fseek(f_lrc, 0, SEEK_SET);
+
+    if (length <= 0) {
+        fclose(f_lrc);
+        return 0;
+    }
+
+    char *buf = malloc((size_t)length + 1);
+    if (!buf) {
+        fclose(f_lrc);
+        return 0;
+    }
+
+    size_t read_bytes = fread(buf, 1, (size_t)length, f_lrc);
+    buf[read_bytes] = '\0';
+    fclose(f_lrc);
+
+    int rc = metadata_sync_lyrics(t->filepath, buf, cfg->force);
+    free(buf);
+
+    if (rc == 1) {
+        *out_synced = 1;
+        *out_status = "\xe2\x9c\x93 local lrc";
+        if (cfg->clean_lrc) {
+            unlink(lrc_path);
+        }
+    } else if (rc == 0) {
+        *out_skipped = 1;
+        *out_status = "\xe2\x8a\x98 already has lyrics";
+    } else {
+        *out_error = 1;
+        *out_status = "\xe2\x9c\x97 write error";
+    }
+    return 1;
+}
+
+static int try_api_lrc(const TrackMeta *t, const SyncConfig *cfg,
+                       int *out_synced, int *out_plain, int *out_skipped,
+                       int *out_not_found, int *out_error, const char **out_status)
+{
+    /* Refined LRCLIB lookup: exact match first */
+    LrclibTrack *lrc = lrclib_get(t->artist, t->title, t->album, (double)t->duration);
+
+    /* Fallback: relax constraints if lyrics or track not found */
+    if (!lrc || (!lrc->synced_lyrics && !lrc->instrumental)) {
         lrclib_track_free(lrc);
-        lrc = lrclib_get(t->artist, t->title, t->album, (double)t->duration);
+        lrc = lrclib_get(t->artist, t->title, NULL, 0);
     }
 
     if (!lrc) {
         *out_not_found = 1;
         *out_status = "\xe2\x9c\x97 not found";
-        return;
+        return 1;
     }
 
     /* Pick best available lyrics: synced first, then plain, then instrumental */
@@ -83,18 +127,18 @@ static void process_track(const TrackMeta *t, int force,
         *out_not_found = 1;
         *out_status = "\xe2\x9c\x97 not found";
         lrclib_track_free(lrc);
-        return;
+        return 1;
     }
 
     if (is_inst) {
         /* User requested NOT to write [Instrumental] tags */
         *out_synced = 1; /* Count as success */
         lrclib_track_free(lrc);
-        return;
+        return 1;
     }
 
     /* Single TagLib open: check existing + write if needed */
-    int rc = metadata_sync_lyrics(t->filepath, lyrics, force);
+    int rc = metadata_sync_lyrics(t->filepath, lyrics, cfg->force);
     lrclib_track_free(lrc);
 
     if (rc == 1) {
@@ -106,6 +150,27 @@ static void process_track(const TrackMeta *t, int force,
         *out_error = 1;
         *out_status = "\xe2\x9c\x97 write error";
     }
+    return 1;
+}
+
+static void process_track(const TrackMeta *t, const SyncConfig *cfg,
+                          int *out_synced, int *out_plain,
+                          int *out_skipped, int *out_not_found,
+                          int *out_error, const char **out_status)
+{
+    *out_synced = *out_plain = *out_skipped = *out_not_found = *out_error = 0;
+
+    if (!t->artist || !t->title) {
+        *out_not_found = 1;
+        *out_status = "\xe2\x9c\x97 missing metadata";
+        return;
+    }
+
+    if (try_local_lrc(t, cfg, out_synced, out_skipped, out_error, out_status)) {
+        return;
+    }
+
+    try_api_lrc(t, cfg, out_synced, out_plain, out_skipped, out_not_found, out_error, out_status);
 }
 
 /* ── Worker thread ────────────────────────────────────────────────────── */
@@ -125,7 +190,7 @@ static void *sync_worker(void *arg)
 
         int s = 0, p = 0, sk = 0, nf = 0, e = 0;
         const char *status = "";
-        process_track(t, ctx->force, &s, &p, &sk, &nf, &e, &status);
+        process_track(t, ctx->config, &s, &p, &sk, &nf, &e, &status);
 
         pthread_mutex_lock(&ctx->mutex);
 
@@ -159,25 +224,23 @@ static void *sync_worker(void *arg)
 
 /* ── Public API ───────────────────────────────────────────────────────── */
 
-SyncResult sync_tracks(const TrackMetaList *list, int force,
-                         const char *out_plain, const char *out_missing,
-                         int num_threads, SyncProgressFn progress,
-                         void *user)
+SyncResult sync_tracks(const TrackMetaList *list, const SyncConfig *config,
+                         SyncProgressFn progress, void *user)
 {
     SyncResult empty = {0};
-    if (!list || list->count == 0) return empty;
+    if (!list || list->count == 0 || !config) return empty;
 
-    int t = num_threads > list->count ? list->count : num_threads;
+    int t = config->num_threads > list->count ? list->count : config->num_threads;
 
     SyncContext ctx = {
         .list         = list,
-        .force        = force,
+        .config       = config,
         .next_index   = 0,
         .result       = {0},
         .progress     = progress,
         .user         = user,
-        .plain_file   = out_plain ? fopen(out_plain, "a") : NULL,
-        .missing_file = out_missing ? fopen(out_missing, "a") : NULL
+        .plain_file   = config->out_plain ? fopen(config->out_plain, "a") : NULL,
+        .missing_file = config->out_missing ? fopen(config->out_missing, "a") : NULL
     };
     pthread_mutex_init(&ctx.mutex, NULL);
 
